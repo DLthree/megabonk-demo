@@ -409,7 +409,7 @@ function spawnEnemy() {
     g.add(eye);
   });
   const h = terrainHeight(px, pz);
-  g.position.set(px, Math.max(0, h), pz);
+  g.position.set(px, h, pz);
   scene.add(g);
   enemies.push({
     group: g, hp: enemyHp, maxHp: enemyHp,
@@ -647,7 +647,7 @@ const clock = new THREE.Clock();
 const tmpVec = new THREE.Vector3();
 
 function getPlayerTerrainY(x, z) {
-  return Math.max(0, terrainHeight(x, z));
+  return terrainHeight(x, z);
 }
 
 function update() {
@@ -669,8 +669,9 @@ function update() {
       -Math.sin(camYaw), 0, -Math.cos(camYaw));
     const right = new THREE.Vector3(
       Math.cos(camYaw), 0, -Math.sin(camYaw));
+    const strafeScale = 0.7;
     const moveDir = new THREE.Vector3()
-      .addScaledVector(right, rawX)
+      .addScaledVector(right, rawX * strafeScale)
       .addScaledVector(forward, -rawY)
       .normalize();
 
@@ -730,8 +731,8 @@ function update() {
     dir.normalize();
     e.group.position.addScaledVector(dir, e.speed * dt);
     // terrain follow
-    e.group.position.y = Math.max(0,
-      terrainHeight(e.group.position.x, e.group.position.z));
+    e.group.position.y =
+      terrainHeight(e.group.position.x, e.group.position.z);
     e.group.lookAt(
       pp.x, e.group.position.y + 0.7, pp.z);
     // bob
