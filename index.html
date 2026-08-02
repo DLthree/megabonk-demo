@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>MegaBonk Demo</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;
+  background:#000;touch-action:none;user-select:none}
+canvas{display:block;width:100%;height:100%}
+
+#hud{position:fixed;top:0;left:0;width:100%;padding:12px 16px;
+  display:flex;justify-content:space-between;align-items:flex-start;
+  pointer-events:none;z-index:10;font-family:'Courier New',monospace}
+#hud *{color:#fff;text-shadow:0 0 6px #000,0 0 3px #000}
+.hud-left,.hud-right{display:flex;flex-direction:column;gap:4px}
+.hud-right{align-items:flex-end}
+.hud-label{font-size:11px;opacity:.7;letter-spacing:1px}
+.hud-value{font-size:22px;font-weight:bold}
+
+#xp-bar-bg{position:fixed;bottom:60px;left:50%;transform:translateX(-50%);
+  width:60%;max-width:300px;height:8px;background:rgba(0,0,0,.5);
+  border-radius:4px;z-index:10;pointer-events:none}
+#xp-bar{height:100%;background:#5f5;border-radius:4px;width:0%;
+  transition:width .2s}
+
+#joystick-zone{position:fixed;bottom:0;left:0;width:50%;height:40%;
+  z-index:20}
+#joystick-base{position:absolute;width:100px;height:100px;
+  border-radius:50%;background:rgba(255,255,255,.12);
+  border:2px solid rgba(255,255,255,.25);display:none}
+#joystick-knob{position:absolute;width:44px;height:44px;
+  border-radius:50%;background:rgba(255,255,255,.35);display:none}
+
+#upgrade-panel{position:fixed;top:0;left:0;width:100%;height:100%;
+  background:rgba(0,0,0,.75);z-index:30;display:none;
+  justify-content:center;align-items:center;flex-direction:column;
+  gap:12px;font-family:'Courier New',monospace}
+#upgrade-panel h2{color:#5f5;font-size:20px;margin-bottom:8px}
+.upgrade-btn{background:rgba(40,40,40,.9);border:2px solid #5f5;
+  color:#fff;padding:14px 20px;border-radius:8px;font-size:15px;
+  font-family:inherit;cursor:pointer;width:260px;text-align:left}
+.upgrade-btn:active{background:#5f5;color:#000}
+
+#start-screen{position:fixed;top:0;left:0;width:100%;height:100%;
+  background:rgba(0,0,0,.85);z-index:40;display:flex;
+  justify-content:center;align-items:center;flex-direction:column;
+  gap:16px;font-family:'Courier New',monospace}
+#start-screen h1{color:#5f5;font-size:36px;letter-spacing:3px}
+#start-screen p{color:#aaa;font-size:14px}
+#start-btn{background:#5f5;color:#000;border:none;padding:16px 40px;
+  border-radius:8px;font-size:18px;font-weight:bold;
+  font-family:inherit;cursor:pointer}
+
+#game-over{position:fixed;top:0;left:0;width:100%;height:100%;
+  background:rgba(0,0,0,.8);z-index:40;display:none;
+  justify-content:center;align-items:center;flex-direction:column;
+  gap:12px;font-family:'Courier New',monospace}
+#game-over h1{color:#f55;font-size:28px}
+#game-over p{color:#fff;font-size:16px}
+#restart-btn{background:#f55;color:#fff;border:none;padding:14px 36px;
+  border-radius:8px;font-size:16px;font-weight:bold;
+  font-family:inherit;cursor:pointer}
+</style>
+</head>
+<body>
+
+<div id="hud">
+  <div class="hud-left">
+    <div class="hud-label">WAVE</div>
+    <div class="hud-value" id="wave-num">1</div>
+  </div>
+  <div class="hud-right">
+    <div class="hud-label">KILLS</div>
+    <div class="hud-value" id="kill-count">0</div>
+    <div class="hud-label" style="margin-top:4px">HP</div>
+    <div class="hud-value" id="hp-display">100</div>
+  </div>
+</div>
+<div id="xp-bar-bg"><div id="xp-bar"></div></div>
+
+<div id="joystick-zone">
+  <div id="joystick-base"></div>
+  <div id="joystick-knob"></div>
+</div>
+
+<div id="upgrade-panel">
+  <h2>LEVEL UP!</h2>
+</div>
+
+<div id="start-screen">
+  <h1>MEGABONK</h1>
+  <p>survive the horde</p>
+  <button id="start-btn">BONK</button>
+</div>
+
+<div id="game-over">
+  <h1>BONKED</h1>
+  <p id="go-stats"></p>
+  <button id="restart-btn">TRY AGAIN</button>
+</div>
+
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+/* ── constants ── */
+const ARENA_R = 40;
+const PLAYER_SPEED = 8;
+const ENEMY_BASE_SPEED = 2.5;
+const ATTACK_RANGE = 3.5;
+const ATTACK_CD = 0.45;
+const BONK_DMG = 25;
+const GEM_MAGNET = 3;
+const XP_PER_LVL_BASE = 5;
+
+/* ── state ── */
+let playing = false, paused = false;
+let kills = 0, wave = 1, xp = 0, level = 1, hp = 100, maxHp = 100;
+let xpToNext = XP_PER_LVL_BASE;
+let atkTimer = 0, waveTimer = 0, spawnTimer = 0;
+let enemiesPerWave = 6, enemyHp = 40, enemyDmg = 8;
+let dmgMult = 1, speedMult = 1, atkSpeedMult = 1;
+let magnetMult = 1;
+let enemiesAlive = 0, waveEnemiesSpawned = 0;
+const joystickInput = {x: 0, y: 0};
+
+/* ── three.js setup ── */
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a0a2e);
+scene.fog = new THREE.Fog(0x1a0a2e, 30, 55);
+
+const camera = new THREE.PerspectiveCamera(
+  55, innerWidth / innerHeight, 0.1, 100);
+const renderer = new THREE.WebGLRenderer({antialias: true});
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+document.body.prepend(renderer.domElement);
+
+/* ── lights ── */
+const amb = new THREE.AmbientLight(0x6644aa, 0.6);
+scene.add(amb);
+const dir = new THREE.DirectionalLight(0xffeedd, 1.2);
+dir.position.set(10, 20, 10);
+dir.castShadow = true;
+dir.shadow.mapSize.set(1024, 1024);
+scene.add(dir);
+
+/* ── ground ── */
+const groundGeo = new THREE.CircleGeometry(ARENA_R, 48);
+const groundMat = new THREE.MeshStandardMaterial({
+  color: 0x2a1a4a, roughness: 0.9});
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// arena ring
+const ringGeo = new THREE.TorusGeometry(ARENA_R, 0.3, 8, 64);
+const ringMat = new THREE.MeshStandardMaterial({
+  color: 0x5f5, emissive: 0x2a2, emissiveIntensity: 0.5});
+const ring = new THREE.Mesh(ringGeo, ringMat);
+ring.rotation.x = -Math.PI / 2;
+ring.position.y = 0.3;
+scene.add(ring);
+
+/* ── player ── */
+const playerGroup = new THREE.Group();
+// body
+const bodyGeo = new THREE.CapsuleGeometry(0.4, 0.8, 4, 8);
+const bodyMat = new THREE.MeshStandardMaterial({color: 0x44aaff});
+const body = new THREE.Mesh(bodyGeo, bodyMat);
+body.position.y = 1;
+body.castShadow = true;
+playerGroup.add(body);
+// eyes
+const eyeGeo = new THREE.SphereGeometry(0.1, 8, 8);
+const eyeMat = new THREE.MeshStandardMaterial({
+  color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.5});
+[-0.15, 0.15].forEach(x => {
+  const eye = new THREE.Mesh(eyeGeo, eyeMat);
+  eye.position.set(x, 1.25, 0.35);
+  playerGroup.add(eye);
+});
+// hammer (bonk weapon)
+const hammerGroup = new THREE.Group();
+const handleGeo = new THREE.CylinderGeometry(0.06, 0.06, 1.2, 6);
+const handleMat = new THREE.MeshStandardMaterial({color: 0x8B4513});
+const handle = new THREE.Mesh(handleGeo, handleMat);
+handle.position.y = 0.6;
+hammerGroup.add(handle);
+const headGeo = new THREE.BoxGeometry(0.5, 0.35, 0.35);
+const headMat = new THREE.MeshStandardMaterial({
+  color: 0xcccccc, metalness: 0.6, roughness: 0.3});
+const hammerHead = new THREE.Mesh(headGeo, headMat);
+hammerHead.position.y = 1.25;
+hammerGroup.add(hammerHead);
+hammerGroup.position.set(0.5, 0.3, 0);
+playerGroup.add(hammerGroup);
+scene.add(playerGroup);
+
+/* ── enemy pool ── */
+const enemies = [];
+const enemyColors = [0xff4444, 0xff8844, 0xffaa00, 0xff44aa];
+
+function spawnEnemy() {
+  const angle = Math.random() * Math.PI * 2;
+  const dist = ARENA_R - 2;
+  const g = new THREE.Group();
+  // body
+  const eGeo = new THREE.DodecahedronGeometry(0.5, 0);
+  const eMat = new THREE.MeshStandardMaterial({
+    color: enemyColors[Math.floor(Math.random() * enemyColors.length)]});
+  const eMesh = new THREE.Mesh(eGeo, eMat);
+  eMesh.position.y = 0.7;
+  eMesh.castShadow = true;
+  g.add(eMesh);
+  // eyes
+  [-0.15, 0.15].forEach(x => {
+    const eye = new THREE.Mesh(eyeGeo, eyeMat.clone());
+    eye.material.emissive = new THREE.Color(0xff0000);
+    eye.position.set(x, 0.85, 0.4);
+    g.add(eye);
+  });
+  g.position.set(Math.cos(angle) * dist, 0, Math.sin(angle) * dist);
+  scene.add(g);
+  enemies.push({
+    group: g, hp: enemyHp, maxHp: enemyHp,
+    speed: ENEMY_BASE_SPEED * (0.8 + Math.random() * 0.4),
+    flash: 0, mesh: eMesh, mat: eMat
+  });
+  enemiesAlive++;
+  waveEnemiesSpawned++;
+}
+
+/* ── gems ── */
+const gems = [];
+const gemGeo = new THREE.OctahedronGeometry(0.15, 0);
+const gemMat = new THREE.MeshStandardMaterial({
+  color: 0x55ff55, emissive: 0x22aa22, emissiveIntensity: 0.8});
+
+function spawnGem(pos) {
+  const g = new THREE.Mesh(gemGeo, gemMat.clone());
+  g.position.copy(pos);
+  g.position.y = 0.4;
+  scene.add(g);
+  gems.push({mesh: g, life: 15});
+}
+
+/* ── damage numbers ── */
+const dmgNums = [];
+const dmgCanvas = document.createElement('canvas');
+dmgCanvas.width = 128; dmgCanvas.height = 64;
+const dmgCtx = dmgCanvas.getContext('2d');
+
+function spawnDmgNum(pos, val) {
+  dmgCtx.clearRect(0, 0, 128, 64);
+  dmgCtx.font = 'bold 48px Courier New';
+  dmgCtx.fillStyle = '#ffff44';
+  dmgCtx.strokeStyle = '#000';
+  dmgCtx.lineWidth = 4;
+  dmgCtx.textAlign = 'center';
+  dmgCtx.strokeText(val, 64, 50);
+  dmgCtx.fillText(val, 64, 50);
+  const tex = new THREE.CanvasTexture(dmgCanvas);
+  const spr = new THREE.Sprite(
+    new THREE.SpriteMaterial({map: tex, transparent: true}));
+  spr.position.copy(pos);
+  spr.position.y += 2;
+  spr.scale.set(1.5, 0.75, 1);
+  scene.add(spr);
+  dmgNums.push({sprite: spr, life: 0.8, vy: 3});
+}
+
+/* ── bonk effect ── */
+let bonkSwing = 0;
+
+function doBonk() {
+  bonkSwing = 1;
+  let hit = false;
+  const pp = playerGroup.position;
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    const e = enemies[i];
+    const d = pp.distanceTo(e.group.position);
+    if (d < ATTACK_RANGE) {
+      const dmg = Math.round(BONK_DMG * dmgMult);
+      e.hp -= dmg;
+      e.flash = 0.15;
+      spawnDmgNum(e.group.position, dmg);
+      hit = true;
+      if (e.hp <= 0) {
+        spawnGem(e.group.position);
+        scene.remove(e.group);
+        enemies.splice(i, 1);
+        kills++;
+        enemiesAlive--;
+      }
+    }
+  }
+  // shockwave ring
+  if (hit) {
+    const ringG = new THREE.RingGeometry(0.2, 0.4, 16);
+    const ringM = new THREE.MeshBasicMaterial({
+      color: 0xffff44, transparent: true, opacity: 0.8, side: 2});
+    const rMesh = new THREE.Mesh(ringG, ringM);
+    rMesh.rotation.x = -Math.PI / 2;
+    rMesh.position.copy(pp);
+    rMesh.position.y = 0.2;
+    scene.add(rMesh);
+    setTimeout(() => scene.remove(rMesh), 200);
+  }
+}
+
+/* ── upgrades ── */
+const UPGRADES = [
+  {name: '+20% Damage', apply: () => { dmgMult *= 1.2; }},
+  {name: '+15% Speed', apply: () => { speedMult *= 1.15; }},
+  {name: '+25% Attack Speed', apply: () => { atkSpeedMult *= 1.25; }},
+  {name: '+30 Max HP', apply: () => { maxHp += 30; hp = maxHp; }},
+  {name: '+50% Magnet Range', apply: () => { magnetMult *= 1.5; }},
+  {name: 'Heal to Full', apply: () => { hp = maxHp; }},
+];
+
+function showUpgrades() {
+  paused = true;
+  const panel = document.getElementById('upgrade-panel');
+  panel.style.display = 'flex';
+  // pick 3 random
+  const picks = [...UPGRADES]
+    .sort(() => Math.random() - 0.5).slice(0, 3);
+  // clear old buttons
+  panel.querySelectorAll('.upgrade-btn').forEach(b => b.remove());
+  picks.forEach(u => {
+    const btn = document.createElement('button');
+    btn.className = 'upgrade-btn';
+    btn.textContent = u.name;
+    btn.onclick = () => {
+      u.apply();
+      panel.style.display = 'none';
+      paused = false;
+    };
+    panel.appendChild(btn);
+  });
+}
+
+/* ── joystick ── */
+const jZone = document.getElementById('joystick-zone');
+const jBase = document.getElementById('joystick-base');
+const jKnob = document.getElementById('joystick-knob');
+let jActive = false, jCenter = {x: 0, y: 0};
+
+jZone.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const t = e.touches[0];
+  jActive = true;
+  jCenter = {x: t.clientX, y: t.clientY};
+  jBase.style.display = 'block';
+  jKnob.style.display = 'block';
+  jBase.style.left = (jCenter.x - 50) + 'px';
+  jBase.style.top = (jCenter.y - 50) + 'px';
+  jKnob.style.left = (jCenter.x - 22) + 'px';
+  jKnob.style.top = (jCenter.y - 22) + 'px';
+}, {passive: false});
+
+jZone.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (!jActive) return;
+  const t = e.touches[0];
+  let dx = t.clientX - jCenter.x;
+  let dy = t.clientY - jCenter.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  const maxR = 45;
+  if (dist > maxR) { dx = dx / dist * maxR; dy = dy / dist * maxR; }
+  jKnob.style.left = (jCenter.x + dx - 22) + 'px';
+  jKnob.style.top = (jCenter.y + dy - 22) + 'px';
+  joystickInput.x = dx / maxR;
+  joystickInput.y = dy / maxR;
+}, {passive: false});
+
+const endJoystick = () => {
+  jActive = false;
+  joystickInput.x = 0; joystickInput.y = 0;
+  jBase.style.display = 'none';
+  jKnob.style.display = 'none';
+};
+jZone.addEventListener('touchend', endJoystick);
+jZone.addEventListener('touchcancel', endJoystick);
+
+/* ── keyboard (desktop fallback) ── */
+const keys = {};
+window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+function getKeyboardInput() {
+  let kx = 0, ky = 0;
+  if (keys['w'] || keys['arrowup']) ky = -1;
+  if (keys['s'] || keys['arrowdown']) ky = 1;
+  if (keys['a'] || keys['arrowleft']) kx = -1;
+  if (keys['d'] || keys['arrowright']) kx = 1;
+  if (kx || ky) {
+    const len = Math.sqrt(kx * kx + ky * ky);
+    return {x: kx / len, y: ky / len};
+  }
+  return null;
+}
+
+/* ── game loop ── */
+const clock = new THREE.Clock();
+const camOffset = new THREE.Vector3(0, 14, 10);
+
+function update() {
+  if (!playing || paused) return;
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const pp = playerGroup.position;
+
+  // input
+  const kb = getKeyboardInput();
+  const ix = kb ? kb.x : joystickInput.x;
+  const iy = kb ? kb.y : joystickInput.y;
+
+  // move player
+  const moveLen = Math.sqrt(ix * ix + iy * iy);
+  if (moveLen > 0.1) {
+    pp.x += ix * PLAYER_SPEED * speedMult * dt;
+    pp.z += iy * PLAYER_SPEED * speedMult * dt;
+    // face direction
+    playerGroup.rotation.y = Math.atan2(-ix, -iy);
+  }
+  // clamp to arena
+  const pDist = Math.sqrt(pp.x * pp.x + pp.z * pp.z);
+  if (pDist > ARENA_R - 1) {
+    pp.x = pp.x / pDist * (ARENA_R - 1);
+    pp.z = pp.z / pDist * (ARENA_R - 1);
+  }
+
+  // camera follow
+  camera.position.lerp(
+    new THREE.Vector3().copy(pp).add(camOffset), 4 * dt);
+  camera.lookAt(pp.x, 0, pp.z);
+
+  // auto attack
+  atkTimer -= dt;
+  if (atkTimer <= 0 && enemies.length > 0) {
+    // check if any enemy in range
+    const closest = enemies.reduce((best, e) => {
+      const d = pp.distanceTo(e.group.position);
+      return d < best.d ? {d, e} : best;
+    }, {d: Infinity, e: null});
+    if (closest.d < ATTACK_RANGE) {
+      doBonk();
+      atkTimer = ATTACK_CD / atkSpeedMult;
+    }
+  }
+
+  // hammer swing animation
+  if (bonkSwing > 0) {
+    bonkSwing -= dt * 6;
+    hammerGroup.rotation.z = Math.sin(bonkSwing * Math.PI) * 1.2;
+  } else {
+    hammerGroup.rotation.z *= 0.9;
+  }
+
+  // enemies
+  for (const e of enemies) {
+    const dir = new THREE.Vector3()
+      .subVectors(pp, e.group.position).normalize();
+    e.group.position.addScaledVector(dir, e.speed * dt);
+    e.group.lookAt(pp);
+    // bob
+    e.group.children[0].position.y =
+      0.7 + Math.sin(Date.now() * 0.005 + e.speed) * 0.1;
+    // flash
+    if (e.flash > 0) {
+      e.flash -= dt;
+      e.mat.emissive.setHex(0xffffff);
+      e.mat.emissiveIntensity = e.flash * 6;
+    } else {
+      e.mat.emissive.setHex(0x000000);
+    }
+    // damage player
+    if (pp.distanceTo(e.group.position) < 0.9) {
+      hp -= enemyDmg * dt;
+      if (hp <= 0) { gameOver(); return; }
+    }
+  }
+
+  // gems
+  for (let i = gems.length - 1; i >= 0; i--) {
+    const g = gems[i];
+    g.life -= dt;
+    g.mesh.rotation.y += dt * 3;
+    g.mesh.position.y = 0.4 + Math.sin(Date.now() * 0.004) * 0.1;
+    const gd = pp.distanceTo(g.mesh.position);
+    // magnet
+    if (gd < GEM_MAGNET * magnetMult) {
+      const dir = new THREE.Vector3()
+        .subVectors(pp, g.mesh.position).normalize();
+      g.mesh.position.addScaledVector(dir, 12 * dt);
+    }
+    if (gd < 0.8 || g.life <= 0) {
+      if (gd < 0.8) {
+        xp++;
+        if (xp >= xpToNext) {
+          xp = 0;
+          level++;
+          xpToNext = Math.floor(XP_PER_LVL_BASE * Math.pow(1.4, level));
+          showUpgrades();
+        }
+      }
+      scene.remove(g.mesh);
+      gems.splice(i, 1);
+    }
+  }
+
+  // dmg numbers
+  for (let i = dmgNums.length - 1; i >= 0; i--) {
+    const d = dmgNums[i];
+    d.life -= dt;
+    d.sprite.position.y += d.vy * dt;
+    d.sprite.material.opacity = Math.max(0, d.life / 0.8);
+    if (d.life <= 0) {
+      scene.remove(d.sprite);
+      dmgNums.splice(i, 1);
+    }
+  }
+
+  // wave spawning
+  waveTimer += dt;
+  spawnTimer -= dt;
+  if (waveEnemiesSpawned < enemiesPerWave && spawnTimer <= 0) {
+    spawnEnemy();
+    spawnTimer = 0.6;
+  }
+  if (waveEnemiesSpawned >= enemiesPerWave && enemiesAlive === 0) {
+    wave++;
+    enemiesPerWave = Math.floor(6 + wave * 3);
+    enemyHp = Math.floor(40 + wave * 12);
+    enemyDmg = Math.floor(8 + wave * 2);
+    waveEnemiesSpawned = 0;
+    waveTimer = 0;
+  }
+
+  // HUD
+  document.getElementById('wave-num').textContent = wave;
+  document.getElementById('kill-count').textContent = kills;
+  document.getElementById('hp-display').textContent = Math.ceil(hp);
+  document.getElementById('xp-bar').style.width =
+    (xp / xpToNext * 100) + '%';
+}
+
+function gameOver() {
+  playing = false;
+  document.getElementById('go-stats').textContent =
+    `Wave ${wave}  ·  ${kills} kills  ·  Level ${level}`;
+  document.getElementById('game-over').style.display = 'flex';
+}
+
+function startGame() {
+  // reset
+  kills = 0; wave = 1; xp = 0; level = 1;
+  hp = 100; maxHp = 100;
+  xpToNext = XP_PER_LVL_BASE;
+  dmgMult = 1; speedMult = 1; atkSpeedMult = 1; magnetMult = 1;
+  atkTimer = 0; waveTimer = 0; spawnTimer = 0;
+  enemiesPerWave = 6; enemyHp = 40; enemyDmg = 8;
+  enemiesAlive = 0; waveEnemiesSpawned = 0;
+  paused = false;
+
+  // clear entities
+  enemies.forEach(e => scene.remove(e.group));
+  enemies.length = 0;
+  gems.forEach(g => scene.remove(g.mesh));
+  gems.length = 0;
+  dmgNums.forEach(d => scene.remove(d.sprite));
+  dmgNums.length = 0;
+
+  playerGroup.position.set(0, 0, 0);
+  camera.position.copy(
+    new THREE.Vector3().copy(playerGroup.position).add(camOffset));
+  clock.getDelta(); // reset dt
+
+  playing = true;
+  document.getElementById('start-screen').style.display = 'none';
+  document.getElementById('game-over').style.display = 'none';
+}
+
+document.getElementById('start-btn').addEventListener('click', startGame);
+document.getElementById('restart-btn').addEventListener('click', startGame);
+
+function animate() {
+  requestAnimationFrame(animate);
+  update();
+  renderer.render(scene, camera);
+}
+
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+animate();
+</script>
+</body>
+</html>
