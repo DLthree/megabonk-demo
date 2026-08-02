@@ -25,16 +25,24 @@ canvas{display:block;width:100%;height:100%}
 #xp-bar{height:100%;background:#5f5;border-radius:4px;width:0%;
   transition:width .2s}
 
-#joystick-zone{position:fixed;bottom:0;left:0;width:45%;height:45%;
-  z-index:20}
-#joystick-base{position:absolute;width:100px;height:100px;
-  border-radius:50%;background:rgba(255,255,255,.12);
-  border:2px solid rgba(255,255,255,.25);display:none}
-#joystick-knob{position:absolute;width:44px;height:44px;
-  border-radius:50%;background:rgba(255,255,255,.35);display:none}
+#dpad{position:fixed;bottom:30px;left:20px;
+  width:150px;height:150px;z-index:20;pointer-events:none}
+.dpad-btn{position:absolute;width:50px;height:50px;
+  border-radius:8px;background:rgba(255,255,255,.15);
+  border:2px solid rgba(255,255,255,.3);pointer-events:auto;
+  display:flex;align-items:center;justify-content:center;
+  font-size:22px;color:rgba(255,255,255,.6);
+  font-family:'Courier New',monospace}
+.dpad-btn:active,.dpad-btn.pressed{background:rgba(255,255,255,.35)}
+#dpad-up{left:50px;top:0}
+#dpad-down{left:50px;bottom:0}
+#dpad-left{left:0;top:50px}
+#dpad-right{right:0;top:50px}
+#dpad-center{left:50px;top:50px;background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.15);pointer-events:none}
 
-#cam-zone{position:fixed;bottom:0;right:0;width:55%;height:100%;
-  z-index:15}
+#cam-zone{position:fixed;top:0;left:0;width:100%;height:100%;
+  z-index:12}
 
 #upgrade-panel{position:fixed;top:0;left:0;width:100%;height:100%;
   background:rgba(0,0,0,.75);z-index:30;display:none;
@@ -91,9 +99,12 @@ canvas{display:block;width:100%;height:100%}
 </div>
 <div id="xp-bar-bg"><div id="xp-bar"></div></div>
 
-<div id="joystick-zone">
-  <div id="joystick-base"></div>
-  <div id="joystick-knob"></div>
+<div id="dpad">
+  <div class="dpad-btn" id="dpad-up">&#9650;</div>
+  <div class="dpad-btn" id="dpad-down">&#9660;</div>
+  <div class="dpad-btn" id="dpad-left">&#9664;</div>
+  <div class="dpad-btn" id="dpad-right">&#9654;</div>
+  <div class="dpad-btn" id="dpad-center">+</div>
 </div>
 <div id="cam-zone"></div>
 
@@ -103,7 +114,7 @@ canvas{display:block;width:100%;height:100%}
 
 <div id="start-screen">
   <h1>MEGABONK</h1>
-  <p>Left thumb: move<br>Right thumb: camera<br>Auto-bonk when enemies are close</p>
+  <p>D-pad: move &amp; strafe<br>Drag screen: camera<br>Auto-bonk when enemies are close</p>
   <button id="start-btn">BONK</button>
 </div>
 
@@ -113,7 +124,7 @@ canvas{display:block;width:100%;height:100%}
   <button id="restart-btn">TRY AGAIN</button>
 </div>
 
-<div id="controls-hint">L: move · R: camera</div>
+<div id="controls-hint">D-pad: move · Drag: camera</div>
 
 <script type="importmap">
 {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js"}}
@@ -531,55 +542,40 @@ function showUpgrades() {
   });
 }
 
-// ── joystick ──
-const jZone = document.getElementById('joystick-zone');
-const jBase = document.getElementById('joystick-base');
-const jKnob = document.getElementById('joystick-knob');
-let jTouchId = null;
+// ── d-pad ──
+const dpadState = {up: false, down: false, left: false, right: false};
 
-jZone.addEventListener('touchstart', e => {
-  e.preventDefault();
-  const t = e.changedTouches[0];
-  jTouchId = t.identifier;
-  const cx = t.clientX, cy = t.clientY;
-  jBase.style.display = 'block';
-  jKnob.style.display = 'block';
-  jBase.style.left = (cx - 50) + 'px';
-  jBase.style.top = (cy - 50) + 'px';
-  jKnob.style.left = (cx - 22) + 'px';
-  jKnob.style.top = (cy - 22) + 'px';
-  joystickInput.x = 0;
-  joystickInput.y = 0;
-}, {passive: false});
-
-jZone.addEventListener('touchmove', e => {
-  e.preventDefault();
-  for (const t of e.changedTouches) {
-    if (t.identifier !== jTouchId) continue;
-    const bcr = jBase.getBoundingClientRect();
-    const cx = bcr.left + 50, cy = bcr.top + 50;
-    let dx = t.clientX - cx, dy = t.clientY - cy;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const maxR = 45;
-    if (dist > maxR) { dx = dx / dist * maxR; dy = dy / dist * maxR; }
-    jKnob.style.left = (cx + dx - 22) + 'px';
-    jKnob.style.top = (cy + dy - 22) + 'px';
-    joystickInput.x = dx / maxR;
-    joystickInput.y = dy / maxR;
-  }
-}, {passive: false});
-
-function endJoystick(e) {
-  for (const t of e.changedTouches) {
-    if (t.identifier !== jTouchId) continue;
-    jTouchId = null;
-    joystickInput.x = 0; joystickInput.y = 0;
-    jBase.style.display = 'none';
-    jKnob.style.display = 'none';
-  }
+function bindDpad(id, dir) {
+  const el = document.getElementById(id);
+  const onStart = e => {
+    e.preventDefault(); dpadState[dir] = true;
+    el.classList.add('pressed');
+  };
+  const onEnd = e => {
+    e.preventDefault(); dpadState[dir] = false;
+    el.classList.remove('pressed');
+  };
+  el.addEventListener('touchstart', onStart, {passive: false});
+  el.addEventListener('touchend', onEnd, {passive: false});
+  el.addEventListener('touchcancel', onEnd, {passive: false});
 }
-jZone.addEventListener('touchend', endJoystick);
-jZone.addEventListener('touchcancel', endJoystick);
+bindDpad('dpad-up', 'up');
+bindDpad('dpad-down', 'down');
+bindDpad('dpad-left', 'left');
+bindDpad('dpad-right', 'right');
+
+function getDpadInput() {
+  let x = 0, y = 0;
+  if (dpadState.up) y = -1;
+  if (dpadState.down) y = 1;
+  if (dpadState.left) x = -1;
+  if (dpadState.right) x = 1;
+  if (x || y) {
+    const len = Math.sqrt(x * x + y * y);
+    return {x: x / len, y: y / len};
+  }
+  return null;
+}
 
 // ── camera touch (right side) ──
 const camZone = document.getElementById('cam-zone');
@@ -601,7 +597,7 @@ camZone.addEventListener('touchmove', e => {
     const dy = t.clientY - camLastY;
     camYaw -= dx * CAM_SENSITIVITY;
     camPitch = THREE.MathUtils.clamp(
-      camPitch - dy * CAM_SENSITIVITY, 0.15, 1.2);
+      camPitch + dy * CAM_SENSITIVITY, 0.15, 1.2);
     camLastX = t.clientX;
     camLastY = t.clientY;
   }
@@ -625,7 +621,7 @@ window.addEventListener('mousemove', e => {
   if (!mouseDown) return;
   camYaw -= (e.clientX - camLastX) * CAM_SENSITIVITY;
   camPitch = THREE.MathUtils.clamp(
-    camPitch - (e.clientY - camLastY) * CAM_SENSITIVITY, 0.15, 1.2);
+    camPitch + (e.clientY - camLastY) * CAM_SENSITIVITY, 0.15, 1.2);
   camLastX = e.clientX; camLastY = e.clientY;
 });
 
@@ -661,8 +657,10 @@ function update() {
 
   // input — move relative to camera direction
   const kb = getKeyboardInput();
-  const rawX = kb ? kb.x : joystickInput.x;
-  const rawY = kb ? kb.y : joystickInput.y;
+  const dp = getDpadInput();
+  const src = kb || dp;
+  const rawX = src ? src.x : 0;
+  const rawY = src ? src.y : 0;
   const moveLen = Math.sqrt(rawX * rawX + rawY * rawY);
 
   if (moveLen > 0.1) {
