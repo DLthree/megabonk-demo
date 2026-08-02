@@ -10,28 +10,31 @@ html,body{width:100%;height:100%;overflow:hidden;
   background:#000;touch-action:none;user-select:none}
 canvas{display:block;width:100%;height:100%}
 
-#hud{position:fixed;top:0;left:0;width:100%;padding:12px 16px;
+#hud{position:fixed;top:0;left:0;width:100%;padding:10px 14px;
   display:flex;justify-content:space-between;align-items:flex-start;
   pointer-events:none;z-index:10;font-family:'Courier New',monospace}
 #hud *{color:#fff;text-shadow:0 0 6px #000,0 0 3px #000}
-.hud-left,.hud-right{display:flex;flex-direction:column;gap:4px}
+.hud-left,.hud-right{display:flex;flex-direction:column;gap:3px}
 .hud-right{align-items:flex-end}
-.hud-label{font-size:11px;opacity:.7;letter-spacing:1px}
-.hud-value{font-size:22px;font-weight:bold}
+.hud-label{font-size:10px;opacity:.7;letter-spacing:1px}
+.hud-value{font-size:20px;font-weight:bold}
 
-#xp-bar-bg{position:fixed;bottom:60px;left:50%;transform:translateX(-50%);
-  width:60%;max-width:300px;height:8px;background:rgba(0,0,0,.5);
+#xp-bar-bg{position:fixed;bottom:54px;left:50%;transform:translateX(-50%);
+  width:55%;max-width:280px;height:7px;background:rgba(0,0,0,.5);
   border-radius:4px;z-index:10;pointer-events:none}
 #xp-bar{height:100%;background:#5f5;border-radius:4px;width:0%;
   transition:width .2s}
 
-#joystick-zone{position:fixed;bottom:0;left:0;width:50%;height:40%;
+#joystick-zone{position:fixed;bottom:0;left:0;width:45%;height:45%;
   z-index:20}
 #joystick-base{position:absolute;width:100px;height:100px;
   border-radius:50%;background:rgba(255,255,255,.12);
   border:2px solid rgba(255,255,255,.25);display:none}
 #joystick-knob{position:absolute;width:44px;height:44px;
   border-radius:50%;background:rgba(255,255,255,.35);display:none}
+
+#cam-zone{position:fixed;bottom:0;right:0;width:55%;height:100%;
+  z-index:15}
 
 #upgrade-panel{position:fixed;top:0;left:0;width:100%;height:100%;
   background:rgba(0,0,0,.75);z-index:30;display:none;
@@ -48,7 +51,8 @@ canvas{display:block;width:100%;height:100%}
   justify-content:center;align-items:center;flex-direction:column;
   gap:16px;font-family:'Courier New',monospace}
 #start-screen h1{color:#5f5;font-size:36px;letter-spacing:3px}
-#start-screen p{color:#aaa;font-size:14px}
+#start-screen p{color:#aaa;font-size:13px;text-align:center;
+  max-width:280px;line-height:1.5}
 #start-btn{background:#5f5;color:#000;border:none;padding:16px 40px;
   border-radius:8px;font-size:18px;font-weight:bold;
   font-family:inherit;cursor:pointer}
@@ -62,6 +66,11 @@ canvas{display:block;width:100%;height:100%}
 #restart-btn{background:#f55;color:#fff;border:none;padding:14px 36px;
   border-radius:8px;font-size:16px;font-weight:bold;
   font-family:inherit;cursor:pointer}
+
+#controls-hint{position:fixed;bottom:10px;left:50%;
+  transform:translateX(-50%);color:rgba(255,255,255,.4);
+  font-size:10px;font-family:'Courier New',monospace;
+  pointer-events:none;z-index:10}
 </style>
 </head>
 <body>
@@ -70,6 +79,8 @@ canvas{display:block;width:100%;height:100%}
   <div class="hud-left">
     <div class="hud-label">WAVE</div>
     <div class="hud-value" id="wave-num">1</div>
+    <div class="hud-label" style="margin-top:4px">LVL</div>
+    <div class="hud-value" id="lvl-num">1</div>
   </div>
   <div class="hud-right">
     <div class="hud-label">KILLS</div>
@@ -84,6 +95,7 @@ canvas{display:block;width:100%;height:100%}
   <div id="joystick-base"></div>
   <div id="joystick-knob"></div>
 </div>
+<div id="cam-zone"></div>
 
 <div id="upgrade-panel">
   <h2>LEVEL UP!</h2>
@@ -91,7 +103,7 @@ canvas{display:block;width:100%;height:100%}
 
 <div id="start-screen">
   <h1>MEGABONK</h1>
-  <p>survive the horde</p>
+  <p>Left thumb: move<br>Right thumb: camera<br>Auto-bonk when enemies are close</p>
   <button id="start-btn">BONK</button>
 </div>
 
@@ -101,82 +113,229 @@ canvas{display:block;width:100%;height:100%}
   <button id="restart-btn">TRY AGAIN</button>
 </div>
 
+<div id="controls-hint">L: move · R: camera</div>
+
 <script type="importmap">
 {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js"}}
 </script>
 <script type="module">
 import * as THREE from 'three';
 
-/* ── constants ── */
-const ARENA_R = 40;
-const PLAYER_SPEED = 8;
-const ENEMY_BASE_SPEED = 2.5;
-const ATTACK_RANGE = 3.5;
-const ATTACK_CD = 0.45;
+const ARENA_R = 50;
+const PLAYER_SPEED = 9;
+const ENEMY_BASE_SPEED = 2.8;
+const ATTACK_RANGE = 3.8;
+const ATTACK_CD = 0.4;
 const BONK_DMG = 25;
-const GEM_MAGNET = 3;
+const GEM_MAGNET = 3.5;
 const XP_PER_LVL_BASE = 5;
 
-/* ── state ── */
 let playing = false, paused = false;
 let kills = 0, wave = 1, xp = 0, level = 1, hp = 100, maxHp = 100;
 let xpToNext = XP_PER_LVL_BASE;
-let atkTimer = 0, waveTimer = 0, spawnTimer = 0;
+let atkTimer = 0, spawnTimer = 0;
 let enemiesPerWave = 6, enemyHp = 40, enemyDmg = 8;
-let dmgMult = 1, speedMult = 1, atkSpeedMult = 1;
-let magnetMult = 1;
+let dmgMult = 1, speedMult = 1, atkSpeedMult = 1, magnetMult = 1;
 let enemiesAlive = 0, waveEnemiesSpawned = 0;
 const joystickInput = {x: 0, y: 0};
 
-/* ── three.js setup ── */
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x1a0a2e);
-scene.fog = new THREE.Fog(0x1a0a2e, 30, 55);
+// camera orbit
+let camYaw = 0, camPitch = 0.45;
+const CAM_DIST = 12;
+const CAM_HEIGHT_OFFSET = 2;
+const CAM_LOOK_HEIGHT = 1.5;
+const CAM_SENSITIVITY = 0.004;
 
+// ── renderer ──
+const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(
-  55, innerWidth / innerHeight, 0.1, 100);
+  60, innerWidth / innerHeight, 0.1, 200);
 const renderer = new THREE.WebGLRenderer({antialias: true});
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
 document.body.prepend(renderer.domElement);
 
-/* ── lights ── */
-const amb = new THREE.AmbientLight(0x6644aa, 0.6);
-scene.add(amb);
-const dir = new THREE.DirectionalLight(0xffeedd, 1.2);
-dir.position.set(10, 20, 10);
+// ── sky gradient ──
+const skyCanvas = document.createElement('canvas');
+skyCanvas.width = 2; skyCanvas.height = 256;
+const skyCtx = skyCanvas.getContext('2d');
+const grad = skyCtx.createLinearGradient(0, 0, 0, 256);
+grad.addColorStop(0, '#0a0520');
+grad.addColorStop(0.3, '#1a0a3e');
+grad.addColorStop(0.6, '#2d1b69');
+grad.addColorStop(0.85, '#4a2c8a');
+grad.addColorStop(1, '#6b3fa0');
+skyCtx.fillStyle = grad;
+skyCtx.fillRect(0, 0, 2, 256);
+const skyTex = new THREE.CanvasTexture(skyCanvas);
+skyTex.magFilter = THREE.LinearFilter;
+scene.background = skyTex;
+scene.fog = new THREE.FogExp2(0x1a0a3e, 0.012);
+
+// ── lights ──
+scene.add(new THREE.AmbientLight(0x8866cc, 0.5));
+const dir = new THREE.DirectionalLight(0xffeedd, 1.4);
+dir.position.set(20, 30, 15);
 dir.castShadow = true;
-dir.shadow.mapSize.set(1024, 1024);
+dir.shadow.mapSize.set(2048, 2048);
+dir.shadow.camera.near = 1;
+dir.shadow.camera.far = 80;
+dir.shadow.camera.left = -40;
+dir.shadow.camera.right = 40;
+dir.shadow.camera.top = 40;
+dir.shadow.camera.bottom = -40;
 scene.add(dir);
+// rim light
+const rim = new THREE.DirectionalLight(0x6644ff, 0.4);
+rim.position.set(-15, 10, -20);
+scene.add(rim);
 
-/* ── ground ── */
-const groundGeo = new THREE.CircleGeometry(ARENA_R, 48);
-const groundMat = new THREE.MeshStandardMaterial({
-  color: 0x2a1a4a, roughness: 0.9});
-const ground = new THREE.Mesh(groundGeo, groundMat);
-ground.rotation.x = -Math.PI / 2;
-ground.receiveShadow = true;
-scene.add(ground);
+// ── terrain ──
+const terrainSize = ARENA_R * 2.5;
+const terrainSeg = 80;
+const terrainGeo = new THREE.PlaneGeometry(
+  terrainSize, terrainSize, terrainSeg, terrainSeg);
+terrainGeo.rotateX(-Math.PI / 2);
+const verts = terrainGeo.attributes.position;
 
-// arena ring
-const ringGeo = new THREE.TorusGeometry(ARENA_R, 0.3, 8, 64);
-const ringMat = new THREE.MeshStandardMaterial({
-  color: 0x5f5, emissive: 0x2a2, emissiveIntensity: 0.5});
-const ring = new THREE.Mesh(ringGeo, ringMat);
-ring.rotation.x = -Math.PI / 2;
-ring.position.y = 0.3;
-scene.add(ring);
+// height function
+function terrainHeight(x, z) {
+  let h = 0;
+  h += Math.sin(x * 0.08) * Math.cos(z * 0.06) * 2.5;
+  h += Math.sin(x * 0.15 + 1) * Math.cos(z * 0.12 + 2) * 1.2;
+  h += Math.sin(x * 0.25 + z * 0.2) * 0.6;
+  // flatten center arena area
+  const dist = Math.sqrt(x * x + z * z);
+  if (dist < ARENA_R * 0.7) {
+    h *= dist / (ARENA_R * 0.7);
+  }
+  return h;
+}
 
-/* ── player ── */
+for (let i = 0; i < verts.count; i++) {
+  const x = verts.getX(i);
+  const z = verts.getZ(i);
+  verts.setY(i, terrainHeight(x, z));
+}
+terrainGeo.computeVertexNormals();
+
+// vertex colors for terrain
+const colors = new Float32Array(verts.count * 3);
+for (let i = 0; i < verts.count; i++) {
+  const y = verts.getY(i);
+  const t = THREE.MathUtils.clamp((y + 3) / 6, 0, 1);
+  const c = new THREE.Color().lerpColors(
+    new THREE.Color(0x1a3a1a), new THREE.Color(0x3a6a2a), t);
+  // add variation
+  const dist = Math.sqrt(
+    verts.getX(i) ** 2 + verts.getZ(i) ** 2);
+  if (dist < ARENA_R * 0.3) {
+    c.lerp(new THREE.Color(0x2a4a3a), 0.3);
+  }
+  colors[i * 3] = c.r;
+  colors[i * 3 + 1] = c.g;
+  colors[i * 3 + 2] = c.b;
+}
+terrainGeo.setAttribute('color',
+  new THREE.BufferAttribute(colors, 3));
+
+const terrainMat = new THREE.MeshStandardMaterial({
+  vertexColors: true, roughness: 0.85, metalness: 0.05});
+const terrain = new THREE.Mesh(terrainGeo, terrainMat);
+terrain.receiveShadow = true;
+scene.add(terrain);
+
+// ── trees ──
+function makeTree(x, z) {
+  const g = new THREE.Group();
+  const h = terrainHeight(x, z);
+  // trunk
+  const trunk = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.15, 0.25, 2, 5),
+    new THREE.MeshStandardMaterial({color: 0x5a3a1a}));
+  trunk.position.y = 1;
+  trunk.castShadow = true;
+  g.add(trunk);
+  // canopy layers
+  const leafColors = [0x2a7a2a, 0x3a8a3a, 0x1a6a1a];
+  for (let i = 0; i < 3; i++) {
+    const cone = new THREE.Mesh(
+      new THREE.ConeGeometry(1.4 - i * 0.3, 1.8 - i * 0.3, 6),
+      new THREE.MeshStandardMaterial({color: leafColors[i]}));
+    cone.position.y = 2.2 + i * 1.0;
+    cone.rotation.y = Math.random() * Math.PI;
+    cone.castShadow = true;
+    g.add(cone);
+  }
+  g.position.set(x, h, z);
+  g.scale.setScalar(0.8 + Math.random() * 0.6);
+  scene.add(g);
+}
+
+// ── rocks ──
+function makeRock(x, z) {
+  const h = terrainHeight(x, z);
+  const rock = new THREE.Mesh(
+    new THREE.DodecahedronGeometry(0.5 + Math.random() * 0.8, 0),
+    new THREE.MeshStandardMaterial({
+      color: new THREE.Color().setHSL(0, 0, 0.3 + Math.random() * 0.15),
+      roughness: 0.9}));
+  rock.position.set(x, h + 0.3, z);
+  rock.rotation.set(
+    Math.random() * 0.5, Math.random() * Math.PI, Math.random() * 0.3);
+  rock.scale.y = 0.5 + Math.random() * 0.5;
+  rock.castShadow = true;
+  rock.receiveShadow = true;
+  scene.add(rock);
+}
+
+// scatter props avoiding center arena
+for (let i = 0; i < 60; i++) {
+  const angle = Math.random() * Math.PI * 2;
+  const dist = ARENA_R * 0.5 + Math.random() * ARENA_R * 0.6;
+  const x = Math.cos(angle) * dist;
+  const z = Math.sin(angle) * dist;
+  if (Math.random() < 0.6) makeTree(x, z);
+  else makeRock(x, z);
+}
+// some closer but not too close
+for (let i = 0; i < 20; i++) {
+  const angle = Math.random() * Math.PI * 2;
+  const dist = ARENA_R * 0.35 + Math.random() * ARENA_R * 0.2;
+  makeRock(
+    Math.cos(angle) * dist,
+    Math.sin(angle) * dist);
+}
+
+// ── stars ──
+const starGeo = new THREE.BufferGeometry();
+const starVerts = new Float32Array(600 * 3);
+for (let i = 0; i < 600; i++) {
+  const theta = Math.random() * Math.PI * 2;
+  const phi = Math.random() * Math.PI * 0.4;
+  const r = 80 + Math.random() * 40;
+  starVerts[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+  starVerts[i * 3 + 1] = r * Math.cos(phi) + 20;
+  starVerts[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+}
+starGeo.setAttribute('position',
+  new THREE.BufferAttribute(starVerts, 3));
+scene.add(new THREE.Points(starGeo,
+  new THREE.PointsMaterial({color: 0xffffff, size: 0.3})));
+
+// ── player ──
 const playerGroup = new THREE.Group();
 // body
-const bodyGeo = new THREE.CapsuleGeometry(0.4, 0.8, 4, 8);
 const bodyMat = new THREE.MeshStandardMaterial({color: 0x44aaff});
-const body = new THREE.Mesh(bodyGeo, bodyMat);
-body.position.y = 1;
-body.castShadow = true;
-playerGroup.add(body);
+const bodyMesh = new THREE.Mesh(
+  new THREE.CapsuleGeometry(0.4, 0.8, 4, 8), bodyMat);
+bodyMesh.position.y = 1;
+bodyMesh.castShadow = true;
+playerGroup.add(bodyMesh);
 // eyes
 const eyeGeo = new THREE.SphereGeometry(0.1, 8, 8);
 const eyeMat = new THREE.MeshStandardMaterial({
@@ -186,47 +345,60 @@ const eyeMat = new THREE.MeshStandardMaterial({
   eye.position.set(x, 1.25, 0.35);
   playerGroup.add(eye);
 });
-// hammer (bonk weapon)
+// hammer
 const hammerGroup = new THREE.Group();
-const handleGeo = new THREE.CylinderGeometry(0.06, 0.06, 1.2, 6);
-const handleMat = new THREE.MeshStandardMaterial({color: 0x8B4513});
-const handle = new THREE.Mesh(handleGeo, handleMat);
+const handle = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.06, 0.06, 1.2, 6),
+  new THREE.MeshStandardMaterial({color: 0x8B4513}));
 handle.position.y = 0.6;
 hammerGroup.add(handle);
-const headGeo = new THREE.BoxGeometry(0.5, 0.35, 0.35);
-const headMat = new THREE.MeshStandardMaterial({
-  color: 0xcccccc, metalness: 0.6, roughness: 0.3});
-const hammerHead = new THREE.Mesh(headGeo, headMat);
-hammerHead.position.y = 1.25;
-hammerGroup.add(hammerHead);
-hammerGroup.position.set(0.5, 0.3, 0);
+const hHead = new THREE.Mesh(
+  new THREE.BoxGeometry(0.55, 0.38, 0.38),
+  new THREE.MeshStandardMaterial({
+    color: 0xcccccc, metalness: 0.7, roughness: 0.2}));
+hHead.position.y = 1.25;
+hammerGroup.add(hHead);
+hammerGroup.position.set(0.55, 0.3, 0);
 playerGroup.add(hammerGroup);
+// player shadow disc
+const pShadow = new THREE.Mesh(
+  new THREE.CircleGeometry(0.5, 12),
+  new THREE.MeshBasicMaterial({
+    color: 0x000000, transparent: true, opacity: 0.3}));
+pShadow.rotation.x = -Math.PI / 2;
+pShadow.position.y = 0.05;
+playerGroup.add(pShadow);
 scene.add(playerGroup);
 
-/* ── enemy pool ── */
+// ── enemy pool ──
 const enemies = [];
-const enemyColors = [0xff4444, 0xff8844, 0xffaa00, 0xff44aa];
+const enemyColors = [0xff4444, 0xff6622, 0xffaa00, 0xff44aa, 0xaa22ff];
 
 function spawnEnemy() {
   const angle = Math.random() * Math.PI * 2;
-  const dist = ARENA_R - 2;
+  const dist = 25 + Math.random() * 15;
+  const px = playerGroup.position.x + Math.cos(angle) * dist;
+  const pz = playerGroup.position.z + Math.sin(angle) * dist;
   const g = new THREE.Group();
+  const color = enemyColors[
+    Math.floor(Math.random() * enemyColors.length)];
   // body
-  const eGeo = new THREE.DodecahedronGeometry(0.5, 0);
-  const eMat = new THREE.MeshStandardMaterial({
-    color: enemyColors[Math.floor(Math.random() * enemyColors.length)]});
-  const eMesh = new THREE.Mesh(eGeo, eMat);
+  const eMat = new THREE.MeshStandardMaterial({color});
+  const eMesh = new THREE.Mesh(
+    new THREE.DodecahedronGeometry(0.55, 0), eMat);
   eMesh.position.y = 0.7;
   eMesh.castShadow = true;
   g.add(eMesh);
-  // eyes
-  [-0.15, 0.15].forEach(x => {
-    const eye = new THREE.Mesh(eyeGeo, eyeMat.clone());
-    eye.material.emissive = new THREE.Color(0xff0000);
-    eye.position.set(x, 0.85, 0.4);
+  // angry eyes
+  [-0.18, 0.18].forEach(x => {
+    const eye = new THREE.Mesh(eyeGeo,
+      new THREE.MeshStandardMaterial({
+        color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 0.8}));
+    eye.position.set(x, 0.85, 0.42);
     g.add(eye);
   });
-  g.position.set(Math.cos(angle) * dist, 0, Math.sin(angle) * dist);
+  const h = terrainHeight(px, pz);
+  g.position.set(px, Math.max(0, h), pz);
   scene.add(g);
   enemies.push({
     group: g, hp: enemyHp, maxHp: enemyHp,
@@ -237,21 +409,21 @@ function spawnEnemy() {
   waveEnemiesSpawned++;
 }
 
-/* ── gems ── */
+// ── gems ──
 const gems = [];
-const gemGeo = new THREE.OctahedronGeometry(0.15, 0);
+const gemGeo = new THREE.OctahedronGeometry(0.18, 0);
 const gemMat = new THREE.MeshStandardMaterial({
   color: 0x55ff55, emissive: 0x22aa22, emissiveIntensity: 0.8});
 
 function spawnGem(pos) {
   const g = new THREE.Mesh(gemGeo, gemMat.clone());
   g.position.copy(pos);
-  g.position.y = 0.4;
+  g.position.y += 0.5;
   scene.add(g);
-  gems.push({mesh: g, life: 15});
+  gems.push({mesh: g, life: 20});
 }
 
-/* ── damage numbers ── */
+// ── damage numbers ──
 const dmgNums = [];
 const dmgCanvas = document.createElement('canvas');
 dmgCanvas.width = 128; dmgCanvas.height = 64;
@@ -276,13 +448,13 @@ function spawnDmgNum(pos, val) {
   dmgNums.push({sprite: spr, life: 0.8, vy: 3});
 }
 
-/* ── bonk effect ── */
+// ── bonk ──
 let bonkSwing = 0;
 
 function doBonk() {
   bonkSwing = 1;
-  let hit = false;
   const pp = playerGroup.position;
+  let hit = false;
   for (let i = enemies.length - 1; i >= 0; i--) {
     const e = enemies[i];
     const d = pp.distanceTo(e.group.position);
@@ -301,43 +473,55 @@ function doBonk() {
       }
     }
   }
-  // shockwave ring
   if (hit) {
-    const ringG = new THREE.RingGeometry(0.2, 0.4, 16);
-    const ringM = new THREE.MeshBasicMaterial({
-      color: 0xffff44, transparent: true, opacity: 0.8, side: 2});
-    const rMesh = new THREE.Mesh(ringG, ringM);
-    rMesh.rotation.x = -Math.PI / 2;
-    rMesh.position.copy(pp);
-    rMesh.position.y = 0.2;
-    scene.add(rMesh);
-    setTimeout(() => scene.remove(rMesh), 200);
+    const shockGeo = new THREE.RingGeometry(0.3, 0.6, 16);
+    const shockMat = new THREE.MeshBasicMaterial({
+      color: 0xffff44, transparent: true, opacity: 0.8,
+      side: THREE.DoubleSide});
+    const shock = new THREE.Mesh(shockGeo, shockMat);
+    shock.rotation.x = -Math.PI / 2;
+    shock.position.copy(pp);
+    shock.position.y = 0.3;
+    scene.add(shock);
+    const startTime = performance.now();
+    function expandShock() {
+      const elapsed = (performance.now() - startTime) / 1000;
+      if (elapsed > 0.3) { scene.remove(shock); return; }
+      shock.scale.setScalar(1 + elapsed * 8);
+      shockMat.opacity = 0.8 * (1 - elapsed / 0.3);
+      requestAnimationFrame(expandShock);
+    }
+    expandShock();
   }
 }
 
-/* ── upgrades ── */
+// ── upgrades ──
 const UPGRADES = [
-  {name: '+20% Damage', apply: () => { dmgMult *= 1.2; }},
-  {name: '+15% Speed', apply: () => { speedMult *= 1.15; }},
-  {name: '+25% Attack Speed', apply: () => { atkSpeedMult *= 1.25; }},
-  {name: '+30 Max HP', apply: () => { maxHp += 30; hp = maxHp; }},
-  {name: '+50% Magnet Range', apply: () => { magnetMult *= 1.5; }},
-  {name: 'Heal to Full', apply: () => { hp = maxHp; }},
+  {name: '+25% Damage', icon: '🔨',
+    apply: () => { dmgMult *= 1.25; }},
+  {name: '+20% Speed', icon: '👟',
+    apply: () => { speedMult *= 1.2; }},
+  {name: '+30% Attack Speed', icon: '⚡',
+    apply: () => { atkSpeedMult *= 1.3; }},
+  {name: '+40 Max HP', icon: '❤️',
+    apply: () => { maxHp += 40; hp = maxHp; }},
+  {name: '+60% Magnet Range', icon: '🧲',
+    apply: () => { magnetMult *= 1.6; }},
+  {name: 'Full Heal', icon: '💚',
+    apply: () => { hp = maxHp; }},
 ];
 
 function showUpgrades() {
   paused = true;
   const panel = document.getElementById('upgrade-panel');
   panel.style.display = 'flex';
-  // pick 3 random
   const picks = [...UPGRADES]
     .sort(() => Math.random() - 0.5).slice(0, 3);
-  // clear old buttons
   panel.querySelectorAll('.upgrade-btn').forEach(b => b.remove());
   picks.forEach(u => {
     const btn = document.createElement('button');
     btn.className = 'upgrade-btn';
-    btn.textContent = u.name;
+    btn.textContent = `${u.icon} ${u.name}`;
     btn.onclick = () => {
       u.apply();
       panel.style.display = 'none';
@@ -347,50 +531,104 @@ function showUpgrades() {
   });
 }
 
-/* ── joystick ── */
+// ── joystick ──
 const jZone = document.getElementById('joystick-zone');
 const jBase = document.getElementById('joystick-base');
 const jKnob = document.getElementById('joystick-knob');
-let jActive = false, jCenter = {x: 0, y: 0};
+let jTouchId = null;
 
 jZone.addEventListener('touchstart', e => {
   e.preventDefault();
-  const t = e.touches[0];
-  jActive = true;
-  jCenter = {x: t.clientX, y: t.clientY};
+  const t = e.changedTouches[0];
+  jTouchId = t.identifier;
+  const cx = t.clientX, cy = t.clientY;
   jBase.style.display = 'block';
   jKnob.style.display = 'block';
-  jBase.style.left = (jCenter.x - 50) + 'px';
-  jBase.style.top = (jCenter.y - 50) + 'px';
-  jKnob.style.left = (jCenter.x - 22) + 'px';
-  jKnob.style.top = (jCenter.y - 22) + 'px';
+  jBase.style.left = (cx - 50) + 'px';
+  jBase.style.top = (cy - 50) + 'px';
+  jKnob.style.left = (cx - 22) + 'px';
+  jKnob.style.top = (cy - 22) + 'px';
+  joystickInput.x = 0;
+  joystickInput.y = 0;
 }, {passive: false});
 
 jZone.addEventListener('touchmove', e => {
   e.preventDefault();
-  if (!jActive) return;
-  const t = e.touches[0];
-  let dx = t.clientX - jCenter.x;
-  let dy = t.clientY - jCenter.y;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-  const maxR = 45;
-  if (dist > maxR) { dx = dx / dist * maxR; dy = dy / dist * maxR; }
-  jKnob.style.left = (jCenter.x + dx - 22) + 'px';
-  jKnob.style.top = (jCenter.y + dy - 22) + 'px';
-  joystickInput.x = dx / maxR;
-  joystickInput.y = dy / maxR;
+  for (const t of e.changedTouches) {
+    if (t.identifier !== jTouchId) continue;
+    const bcr = jBase.getBoundingClientRect();
+    const cx = bcr.left + 50, cy = bcr.top + 50;
+    let dx = t.clientX - cx, dy = t.clientY - cy;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const maxR = 45;
+    if (dist > maxR) { dx = dx / dist * maxR; dy = dy / dist * maxR; }
+    jKnob.style.left = (cx + dx - 22) + 'px';
+    jKnob.style.top = (cy + dy - 22) + 'px';
+    joystickInput.x = dx / maxR;
+    joystickInput.y = dy / maxR;
+  }
 }, {passive: false});
 
-const endJoystick = () => {
-  jActive = false;
-  joystickInput.x = 0; joystickInput.y = 0;
-  jBase.style.display = 'none';
-  jKnob.style.display = 'none';
-};
+function endJoystick(e) {
+  for (const t of e.changedTouches) {
+    if (t.identifier !== jTouchId) continue;
+    jTouchId = null;
+    joystickInput.x = 0; joystickInput.y = 0;
+    jBase.style.display = 'none';
+    jKnob.style.display = 'none';
+  }
+}
 jZone.addEventListener('touchend', endJoystick);
 jZone.addEventListener('touchcancel', endJoystick);
 
-/* ── keyboard (desktop fallback) ── */
+// ── camera touch (right side) ──
+const camZone = document.getElementById('cam-zone');
+let camTouchId = null, camLastX = 0, camLastY = 0;
+
+camZone.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const t = e.changedTouches[0];
+  camTouchId = t.identifier;
+  camLastX = t.clientX;
+  camLastY = t.clientY;
+}, {passive: false});
+
+camZone.addEventListener('touchmove', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    if (t.identifier !== camTouchId) continue;
+    const dx = t.clientX - camLastX;
+    const dy = t.clientY - camLastY;
+    camYaw -= dx * CAM_SENSITIVITY;
+    camPitch = THREE.MathUtils.clamp(
+      camPitch - dy * CAM_SENSITIVITY, 0.15, 1.2);
+    camLastX = t.clientX;
+    camLastY = t.clientY;
+  }
+}, {passive: false});
+
+function endCam(e) {
+  for (const t of e.changedTouches) {
+    if (t.identifier === camTouchId) camTouchId = null;
+  }
+}
+camZone.addEventListener('touchend', endCam);
+camZone.addEventListener('touchcancel', endCam);
+
+// ── desktop: mouse for camera, WASD for move ──
+let mouseDown = false;
+renderer.domElement.addEventListener('mousedown', e => {
+  mouseDown = true; camLastX = e.clientX; camLastY = e.clientY;
+});
+window.addEventListener('mouseup', () => mouseDown = false);
+window.addEventListener('mousemove', e => {
+  if (!mouseDown) return;
+  camYaw -= (e.clientX - camLastX) * CAM_SENSITIVITY;
+  camPitch = THREE.MathUtils.clamp(
+    camPitch - (e.clientY - camLastY) * CAM_SENSITIVITY, 0.15, 1.2);
+  camLastX = e.clientX; camLastY = e.clientY;
+});
+
 const keys = {};
 window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
 window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
@@ -408,55 +646,78 @@ function getKeyboardInput() {
   return null;
 }
 
-/* ── game loop ── */
+// ── game loop ──
 const clock = new THREE.Clock();
-const camOffset = new THREE.Vector3(0, 14, 10);
+const tmpVec = new THREE.Vector3();
+
+function getPlayerTerrainY(x, z) {
+  return Math.max(0, terrainHeight(x, z));
+}
 
 function update() {
   if (!playing || paused) return;
   const dt = Math.min(clock.getDelta(), 0.05);
   const pp = playerGroup.position;
 
-  // input
+  // input — move relative to camera direction
   const kb = getKeyboardInput();
-  const ix = kb ? kb.x : joystickInput.x;
-  const iy = kb ? kb.y : joystickInput.y;
+  const rawX = kb ? kb.x : joystickInput.x;
+  const rawY = kb ? kb.y : joystickInput.y;
+  const moveLen = Math.sqrt(rawX * rawX + rawY * rawY);
 
-  // move player
-  const moveLen = Math.sqrt(ix * ix + iy * iy);
   if (moveLen > 0.1) {
-    pp.x += ix * PLAYER_SPEED * speedMult * dt;
-    pp.z += iy * PLAYER_SPEED * speedMult * dt;
-    // face direction
-    playerGroup.rotation.y = Math.atan2(-ix, -iy);
+    // camera-relative movement
+    const forward = new THREE.Vector3(
+      -Math.sin(camYaw), 0, -Math.cos(camYaw));
+    const right = new THREE.Vector3(
+      Math.cos(camYaw), 0, -Math.sin(camYaw));
+    const moveDir = new THREE.Vector3()
+      .addScaledVector(right, rawX)
+      .addScaledVector(forward, -rawY)
+      .normalize();
+
+    pp.x += moveDir.x * PLAYER_SPEED * speedMult * dt;
+    pp.z += moveDir.z * PLAYER_SPEED * speedMult * dt;
+
+    // face movement direction
+    playerGroup.rotation.y = Math.atan2(moveDir.x, moveDir.z);
   }
+
+  // terrain follow
+  pp.y = getPlayerTerrainY(pp.x, pp.z);
+
   // clamp to arena
   const pDist = Math.sqrt(pp.x * pp.x + pp.z * pp.z);
-  if (pDist > ARENA_R - 1) {
-    pp.x = pp.x / pDist * (ARENA_R - 1);
-    pp.z = pp.z / pDist * (ARENA_R - 1);
+  if (pDist > ARENA_R - 2) {
+    pp.x = pp.x / pDist * (ARENA_R - 2);
+    pp.z = pp.z / pDist * (ARENA_R - 2);
   }
 
-  // camera follow
-  camera.position.lerp(
-    new THREE.Vector3().copy(pp).add(camOffset), 4 * dt);
-  camera.lookAt(pp.x, 0, pp.z);
+  // player bob
+  bodyMesh.position.y = 1 + Math.sin(Date.now() * 0.006) * 0.05;
 
-  // auto attack
+  // ── camera orbit ──
+  const camX = pp.x + Math.sin(camYaw) * CAM_DIST * Math.cos(camPitch);
+  const camZ = pp.z + Math.cos(camYaw) * CAM_DIST * Math.cos(camPitch);
+  const camY = pp.y + CAM_DIST * Math.sin(camPitch) + CAM_HEIGHT_OFFSET;
+  camera.position.lerp(tmpVec.set(camX, camY, camZ), 6 * dt);
+  camera.lookAt(pp.x, pp.y + CAM_LOOK_HEIGHT, pp.z);
+
+  // ── auto attack ──
   atkTimer -= dt;
   if (atkTimer <= 0 && enemies.length > 0) {
-    // check if any enemy in range
-    const closest = enemies.reduce((best, e) => {
+    let closest = Infinity;
+    for (const e of enemies) {
       const d = pp.distanceTo(e.group.position);
-      return d < best.d ? {d, e} : best;
-    }, {d: Infinity, e: null});
-    if (closest.d < ATTACK_RANGE) {
+      if (d < closest) closest = d;
+    }
+    if (closest < ATTACK_RANGE) {
       doBonk();
       atkTimer = ATTACK_CD / atkSpeedMult;
     }
   }
 
-  // hammer swing animation
+  // hammer swing
   if (bonkSwing > 0) {
     bonkSwing -= dt * 6;
     hammerGroup.rotation.z = Math.sin(bonkSwing * Math.PI) * 1.2;
@@ -464,15 +725,20 @@ function update() {
     hammerGroup.rotation.z *= 0.9;
   }
 
-  // enemies
+  // ── enemies ──
   for (const e of enemies) {
-    const dir = new THREE.Vector3()
-      .subVectors(pp, e.group.position).normalize();
+    const dir = tmpVec.subVectors(pp, e.group.position);
+    dir.y = 0;
+    dir.normalize();
     e.group.position.addScaledVector(dir, e.speed * dt);
-    e.group.lookAt(pp);
+    // terrain follow
+    e.group.position.y = Math.max(0,
+      terrainHeight(e.group.position.x, e.group.position.z));
+    e.group.lookAt(
+      pp.x, e.group.position.y + 0.7, pp.z);
     // bob
-    e.group.children[0].position.y =
-      0.7 + Math.sin(Date.now() * 0.005 + e.speed) * 0.1;
+    e.mesh.position.y = 0.7 +
+      Math.sin(Date.now() * 0.005 + e.speed * 100) * 0.12;
     // flash
     if (e.flash > 0) {
       e.flash -= dt;
@@ -481,33 +747,35 @@ function update() {
     } else {
       e.mat.emissive.setHex(0x000000);
     }
-    // damage player
+    // damage player on contact
     if (pp.distanceTo(e.group.position) < 0.9) {
       hp -= enemyDmg * dt;
+      // screen flash red
       if (hp <= 0) { gameOver(); return; }
     }
   }
 
-  // gems
+  // ── gems ──
   for (let i = gems.length - 1; i >= 0; i--) {
     const g = gems[i];
     g.life -= dt;
-    g.mesh.rotation.y += dt * 3;
-    g.mesh.position.y = 0.4 + Math.sin(Date.now() * 0.004) * 0.1;
+    g.mesh.rotation.y += dt * 4;
+    g.mesh.position.y = getPlayerTerrainY(
+      g.mesh.position.x, g.mesh.position.z) +
+      0.5 + Math.sin(Date.now() * 0.005 + i) * 0.15;
     const gd = pp.distanceTo(g.mesh.position);
-    // magnet
     if (gd < GEM_MAGNET * magnetMult) {
-      const dir = new THREE.Vector3()
-        .subVectors(pp, g.mesh.position).normalize();
-      g.mesh.position.addScaledVector(dir, 12 * dt);
+      const dir = tmpVec.subVectors(pp, g.mesh.position).normalize();
+      g.mesh.position.addScaledVector(dir, 14 * dt);
     }
-    if (gd < 0.8 || g.life <= 0) {
-      if (gd < 0.8) {
+    if (gd < 0.9 || g.life <= 0) {
+      if (gd < 0.9) {
         xp++;
         if (xp >= xpToNext) {
           xp = 0;
           level++;
-          xpToNext = Math.floor(XP_PER_LVL_BASE * Math.pow(1.4, level));
+          xpToNext = Math.floor(
+            XP_PER_LVL_BASE * Math.pow(1.4, level));
           showUpgrades();
         }
       }
@@ -516,7 +784,7 @@ function update() {
     }
   }
 
-  // dmg numbers
+  // ── damage numbers ──
   for (let i = dmgNums.length - 1; i >= 0; i--) {
     const d = dmgNums[i];
     d.life -= dt;
@@ -528,28 +796,32 @@ function update() {
     }
   }
 
-  // wave spawning
-  waveTimer += dt;
+  // ── wave spawning ──
   spawnTimer -= dt;
   if (waveEnemiesSpawned < enemiesPerWave && spawnTimer <= 0) {
     spawnEnemy();
-    spawnTimer = 0.6;
+    spawnTimer = 0.5;
   }
   if (waveEnemiesSpawned >= enemiesPerWave && enemiesAlive === 0) {
     wave++;
-    enemiesPerWave = Math.floor(6 + wave * 3);
-    enemyHp = Math.floor(40 + wave * 12);
+    enemiesPerWave = Math.floor(6 + wave * 3.5);
+    enemyHp = Math.floor(40 + wave * 15);
     enemyDmg = Math.floor(8 + wave * 2);
     waveEnemiesSpawned = 0;
-    waveTimer = 0;
   }
 
-  // HUD
+  // ── HUD ──
   document.getElementById('wave-num').textContent = wave;
   document.getElementById('kill-count').textContent = kills;
   document.getElementById('hp-display').textContent = Math.ceil(hp);
+  document.getElementById('lvl-num').textContent = level;
   document.getElementById('xp-bar').style.width =
     (xp / xpToNext * 100) + '%';
+
+  // move directional light with player
+  dir.position.set(pp.x + 20, 30, pp.z + 15);
+  dir.target.position.copy(pp);
+  dir.target.updateMatrixWorld();
 }
 
 function gameOver() {
@@ -560,17 +832,16 @@ function gameOver() {
 }
 
 function startGame() {
-  // reset
   kills = 0; wave = 1; xp = 0; level = 1;
   hp = 100; maxHp = 100;
   xpToNext = XP_PER_LVL_BASE;
   dmgMult = 1; speedMult = 1; atkSpeedMult = 1; magnetMult = 1;
-  atkTimer = 0; waveTimer = 0; spawnTimer = 0;
+  atkTimer = 0; spawnTimer = 0;
   enemiesPerWave = 6; enemyHp = 40; enemyDmg = 8;
   enemiesAlive = 0; waveEnemiesSpawned = 0;
   paused = false;
+  camYaw = 0; camPitch = 0.45;
 
-  // clear entities
   enemies.forEach(e => scene.remove(e.group));
   enemies.length = 0;
   gems.forEach(g => scene.remove(g.mesh));
@@ -579,17 +850,16 @@ function startGame() {
   dmgNums.length = 0;
 
   playerGroup.position.set(0, 0, 0);
-  camera.position.copy(
-    new THREE.Vector3().copy(playerGroup.position).add(camOffset));
-  clock.getDelta(); // reset dt
-
+  camera.position.set(0, CAM_DIST * Math.sin(0.45) + CAM_HEIGHT_OFFSET,
+    CAM_DIST * Math.cos(0.45));
+  clock.getDelta();
   playing = true;
   document.getElementById('start-screen').style.display = 'none';
   document.getElementById('game-over').style.display = 'none';
 }
 
-document.getElementById('start-btn').addEventListener('click', startGame);
-document.getElementById('restart-btn').addEventListener('click', startGame);
+document.getElementById('start-btn').onclick = startGame;
+document.getElementById('restart-btn').onclick = startGame;
 
 function animate() {
   requestAnimationFrame(animate);
